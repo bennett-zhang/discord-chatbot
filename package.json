@@ -21,6 +21,7 @@
     "bufferutil": "^4.0.0",
     "discord.js": "^11.5.1",
     "erlpack": "github:discordapp/erlpack",
+    "load-json-file": "^6.2.0",
     "puppeteer": "^1.19.0"
   }
 }

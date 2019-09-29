@@ -1,13 +1,16 @@
 const Discord = require("discord.js")
 const bot = new Discord.Client()
 const puppeteer = require("puppeteer")
+const loadJSONFile = require("load-json-file")
 
-const NAME = "BMO" // The name of the bot
-const BOT_TOKEN = "NjIxMzkwNDkwMTAwODI2MTIy.XXk4YQ.QMO48umHUhq8pLv0ceFxDqStLNc" // The Discord bot token
+let NAME // The name of the bot
 
 const messageQueue = [] // A queue containing the messages that the bot will reply to
 
-bot.login(BOT_TOKEN)
+loadJSONFile("params.json").then(params => {
+  NAME = params.NAME
+  bot.login(params.BOT_TOKEN) // Login with the specified Discord bot token
+})
 
 bot.on("ready", () => {
   console.log(`Logged in as ${bot.user.tag}!`)

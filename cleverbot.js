@@ -29,11 +29,14 @@ module.exports = async (stimulus, context = []) => {
     const reactEmoteMatch = req.text.match(/^{r,([^,]+),([^}]+)}{e,([^,]+),([^}]+)}(.*)$/m)
 
     const res = {
-        reply: decodeURIComponent(req.header["cboutput"]),
-        reaction: reactEmoteMatch[1],
-        reactionDegree: reactEmoteMatch[2],
-        emotion: reactEmoteMatch[3],
-        emotionDegree: reactEmoteMatch[4]
+        reply: decodeURIComponent(req.header["cboutput"])
+    }
+
+    if (reactEmoteMatch) {
+        res.reaction = reactEmoteMatch[1],
+        res.reactionDegree = reactEmoteMatch[2],
+        res.emotion = reactEmoteMatch[3],
+        res.emotionDegree = reactEmoteMatch[4]
     }
 
     return res

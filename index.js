@@ -26,10 +26,18 @@ client.on("ready", () => {
   console.log(`Logged in as ${client.user.tag}!`)
 })
 
-client.on("message", msg => {
-  // Make sure the message isn't from the bot
-  if (msg.author.id === client.user.id)
+client.on("message", async msg => {
+  // Make sure the message isn't from a bot
+  if (msg.author.bot)
     return
+
+  // Make sure this bot was mentioned
+  if (!msg.mentions.users.find(user => user.id === client.user.id))
+    return
+
+  // Remove mentions from the message content
+  msg.content = msg.content.replace(/<@.+?>|<#.+?>/g, "")
+  msg.content = msg.content.trim() // Remove excess whitespace
 
   messageQueue.push(msg) // Add the message to the queue
 

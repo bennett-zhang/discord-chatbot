@@ -31,8 +31,8 @@ client.on("message", async msg => {
   if (msg.author.bot)
     return
 
-  // Make sure this bot was mentioned
-  if (!msg.mentions.users.find(user => user.id === client.user.id))
+  // If the message was sent in a guild, make sure this bot was mentioned
+  if (msg.guild && !msg.mentions.users.find(user => user.id === client.user.id))
     return
 
   // Remove mentions from the message content

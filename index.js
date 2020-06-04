@@ -49,7 +49,8 @@ discordClient.on("message", async msg => {
     return
 
   // If the message was sent in a guild, make sure this bot was mentioned
-  if (msg.guild && !msg.mentions.users.find(user => user.id === discordClient.user.id))
+  if (msg.guild && !msg.mentions.users.find(user => user.id === discordClient.user.id) &&
+      !msg.mentions.roles.intersect(msg.guild.member(discordClient.user).roles.cache).size)
     return
 
   // Remove mentions from the message content

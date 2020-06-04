@@ -62,3 +62,4 @@ typings/
 
 # Bot parameters
 params.json
+google-credentials.json

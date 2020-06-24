@@ -3,7 +3,7 @@ const Discord = require("discord.js")
 const discordClient = new Discord.Client()
 const cleverbot = require("./cleverbot.js")
 const speech = require("@google-cloud/speech")
-const speechClient = new speech.SpeechClient()
+const sttClient = new speech.SpeechClient()
 const textToSpeech = require("@google-cloud/text-to-speech")
 const ttsClient = new textToSpeech.TextToSpeechClient()
 const {Readable} = require("stream")
@@ -23,10 +23,34 @@ const chatHistories = {} // The history of messages each user has with the bot
 const messagesPendingCounts = {} // How many pending messages there are for each channel
 const shouldQuote = {} // Whether or not to quote messages for each channel
 const audioQueues = {} // The queue of audio that the bot is playing in each voice channel
-const hotwordWasSpoken = {} // Whether or not each user in each voice channel has spoken a hotword
 let botNames // The names that the bot will respond to
 let hotwords // The phrases that the bot will respond to
 let emotionsToEmoji // Maps possible bot emotions to their corresponding emojis
+
+const sttRequest = {
+  config: {
+    encoding: "LINEAR16",
+    sampleRateHertz: 44100,
+    audioChannelCount: 2,
+    languageCode: "en-US",
+    //alternativeLanguageCodes: ["vi-VN"],
+    speechContexts: [{
+      phrases: null,
+      boost: 20
+    }]
+  }
+}
+
+const ttsRequest = {
+  input: {text: null},
+  voice: {languageCode: "cmn-TW", name: "cmn-TW-Wavenet-A", ssmlGender: "FEMALE"},
+  //voice: {languageCode: "vi-VN", name: "vi-VN-Wavenet-A", ssmlGender: "FEMALE"},
+  audioConfig: {
+    audioEncoding: "LINEAR16",
+    speakingRate: 1.15,
+    pitch: 5
+  }
+}
 
 fs.readFile("params.json", "utf8", (err, data) => {
   if (err)
@@ -49,6 +73,8 @@ fs.readFile("params.json", "utf8", (err, data) => {
       hotwords.push(`${greeting} ${name}`)
   }
 
+  sttRequest.config.speechContexts[0].phrases = hotwords
+
   discordClient.login(params.token) // Login with the specified Discord bot token
 })
 
@@ -63,7 +89,7 @@ discordClient.on("ready", () => {
   console.log(`Logged in as ${discordClient.user.tag}!`)
 })
 
-discordClient.on("message", async msg => {
+discordClient.on("message", msg => {
   // Make sure the message isn't from a bot
   if (msg.author.bot)
     return
@@ -87,97 +113,85 @@ discordClient.on("message", async msg => {
     if (!voiceChannel)
       return
 
-    // Join the voice channel
-    const connection = await voiceChannel.join()
-
-    // Play silence (required for the bot to receive audio)
-    connection.play(new Silence(), {type: "opus"})
-
-    // Keep track of the users that have said a hotword in this voice channel
-    hotwordWasSpoken[voiceChannel.id] = {}
-
-    // Initialize the audio queue for this voice channel
-    audioQueues[voiceChannel.id] = []
-
-    const chunks = {} // The sound data that the bot is receiving from each user
-    connection.on("speaking", async (user, speaking) => {
-      // If the user has begun speaking
-      if (speaking.has(Discord.Speaking.FLAGS.SPEAKING)) {
-        // Initialize the chunks for this user
-        if (!chunks[user.id])
-          chunks[user.id] = []
-
-        // Listen to this user and update their chunks
-        const stream = connection.receiver.createStream(user, {mode: "pcm"})
-        stream.on("data", chunk => chunks[user.id].push(chunk))
-      }
-      
-      // If the user has finished speaking
-      else if (chunks[user.id] && chunks[user.id].length) {
-        // Convert the chunks to Base64
-        const audioBytes = Buffer.concat(chunks[user.id]).toString("base64")
-        chunks[user.id] = []
-
-        // Transcribe the audio data to text
-        let transcription = (await speechClient.recognize({
-          audio: {
-            content: audioBytes
-          },
-          config: {
-            encoding: "LINEAR16",
-            sampleRateHertz: 44100,
-            audioChannelCount: 2,
-            languageCode: "en-US",
-            //alternativeLanguageCodes: ["vi-VN"],
-            speechContexts: [{
-              phrases: hotwords,
-              boost: 20
-            }]
-          }
-        }))[0].results
-          .map(result => result.alternatives[0].transcript)
-          .join("\n")
-        
-        // If a hotword was spoken
-        if (transcription.trim().match(new RegExp(`^(${hotwords.join("|")})$`, "i"))) {
-          // Play a sound prompting the user to speak
-          connection.play("ready.wav")
-
-          // Remember that this user has spoken a hotword
-          hotwordWasSpoken[voiceChannel.id][user.id] = true
-          return
-        }
-
-        // Make sure this user just spoke a hotword
-        if (!hotwordWasSpoken[voiceChannel.id][user.id])
-          return
-
-        // Remove the bot's name from the transcription
-        transcription = transcription.replace(new RegExp(botNames.join("|"), "gi"), "").trim()
-
-        // Make sure something was said
-        if (!transcription)
-          return
-        
-        console.log(transcription)
-
-        // This user's hotword is no longer active
-        hotwordWasSpoken[voiceChannel.id][user.id] = false
-        
-        // Get the bot's reply to the message, and play it in the voice channel
-        processMessage(new Discord.Message(discordClient, {
-          author: user,
-          content: transcription
-        }, voiceChannel), connection)
-      }
-    })
-
+    // Join and listen in the user's voice channel
+    listenInVoiceChannel(voiceChannel)
     return
   }
 
   // Get the bot's reply to the message, and send it to the text channel
   processMessage(msg)
 })
+
+async function listenInVoiceChannel(voiceChannel) {
+  // Join the voice channel
+  const connection = await voiceChannel.join()
+
+  // Play silence (required for the bot to receive audio)
+  connection.play(new Silence(), {type: "opus"})
+
+  // Initialize the audio queue for this voice channel
+  audioQueues[voiceChannel.id] = []
+
+  // The voice recognition streams for each user
+  const recognizeStreams = {}
+
+  // Keep track of the users that have said a hotword in this voice channel
+  const hotwordWasSpoken = {}
+
+  connection.on("speaking", (user, speaking) => {
+    // If the user has begun speaking
+    if (speaking.has(Discord.Speaking.FLAGS.SPEAKING)) {
+      // Listen to this user
+      const stream = connection.receiver.createStream(user, {mode: "pcm"})
+
+      // Initialize the recognition streams for this user
+      recognizeStreams[user.id] = sttClient.streamingRecognize(sttRequest)
+        .on("error", console.error)
+        .on("data", data => {
+          sttCallback(user, data)
+        })
+
+      stream.pipe(recognizeStreams[user.id])
+    }
+  })
+
+  function sttCallback(user, data) {
+    // Transcribe the audio data to text
+    let transcription = data.results.map(result => result.alternatives[0].transcript).join("\n")
+
+    // If a hotword was spoken
+    if (transcription.trim().match(new RegExp(`^(${hotwords.join("|")})$`, "i"))) {
+      // Play a sound prompting the user to speak
+      connection.play("ready.wav")
+
+      // Remember that this user has spoken a hotword
+      hotwordWasSpoken[user.id] = true
+      return
+    }
+
+    // Make sure this user just spoke a hotword
+    if (!hotwordWasSpoken[user.id])
+      return
+
+    // Remove the bot's name from the transcription
+    transcription = transcription.replace(new RegExp(botNames.join("|"), "gi"), "").trim()
+
+    // Make sure something was said
+    if (!transcription)
+      return
+
+    console.log(transcription)
+
+    // This user's hotword is no longer active
+    hotwordWasSpoken[user.id] = false
+
+    // Get the bot's reply to the message, and play it in the voice channel
+    processMessage(new Discord.Message(discordClient, {
+      author: user,
+      content: transcription
+    }, voiceChannel), connection)
+  }
+}
 
 async function processMessage(msg, connection) {
   // Figure out if the channel is text or voice based
@@ -222,16 +236,8 @@ async function processMessage(msg, connection) {
     reply += `${name}, ${res.reply}`
 
     // Convert the bot's reply to speech
-    const audioContent = (await ttsClient.synthesizeSpeech({
-      input: {text: reply},
-      voice: {languageCode: "cmn-TW", name: "cmn-TW-Wavenet-A", ssmlGender: "FEMALE"},
-      //voice: {languageCode: "vi-VN", name: "vi-VN-Wavenet-A", ssmlGender: "FEMALE"},
-      audioConfig: {
-        audioEncoding: "MP3",
-        speakingRate: 1.15,
-        pitch: 5
-      }
-    }))[0].audioContent
+    ttsRequest.input.text = reply
+    const audioContent = (await ttsClient.synthesizeSpeech(ttsRequest))[0].audioContent
 
     // Create a readable stream containing the audio data
     const readable = new Readable()
@@ -268,7 +274,7 @@ async function processMessage(msg, connection) {
 }
 
 // Play the next stream in the queue
-async function playNextStream(voiceChannel, connection) {
+function playNextStream(voiceChannel, connection) {
   // If there exists a stream in the queue
   if (audioQueues[voiceChannel.id] && audioQueues[voiceChannel.id].length) {
     // Play the first stream in the queue

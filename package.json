@@ -1,6 +1,6 @@
 {
   "name": "discord-chatbot",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "A chatbot that uses artifical intelligence to communicate via Discord.",
   "main": "index.js",
   "scripts": {
@@ -18,16 +18,16 @@
   "homepage": "https://github.com/bennett-zhang/discord-chatbot#readme",
   "dependencies": {
     "@discordjs/opus": "^0.3.2",
-    "@google-cloud/speech": "^4.0.0",
+    "@google-cloud/speech": "^4.1.0",
     "@google-cloud/text-to-speech": "^2.3.0",
     "bufferutil": "^4.0.1",
     "discord.js": "^12.2.0",
     "erlpack": "github:discordapp/erlpack",
-    "ffmpeg-static": "^4.2.2",
+    "ffmpeg-static": "^4.2.5",
     "libsodium-wrappers": "^0.7.6",
     "md5": "^2.2.1",
     "superagent": "^5.2.2",
     "utf-8-validate": "^5.0.2",
-    "zlib-sync": "^0.1.6"
+    "zlib-sync": "^0.1.7"
   }
 }

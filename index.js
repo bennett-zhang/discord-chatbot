@@ -27,10 +27,11 @@ let botNames // The names that the bot will respond to
 let hotwords // The phrases that the bot will respond to
 let emotionsToEmoji // Maps possible bot emotions to their corresponding emojis
 
+// The request sent to Google's speech-to-text service
 const sttRequest = {
   config: {
     encoding: "LINEAR16",
-    sampleRateHertz: 44100,
+    sampleRateHertz: 48000,
     audioChannelCount: 2,
     languageCode: "en-US",
     //alternativeLanguageCodes: ["vi-VN"],
@@ -41,12 +42,13 @@ const sttRequest = {
   }
 }
 
+// The request sent to Google's text-to-speech service
 const ttsRequest = {
   input: {text: null},
   voice: {languageCode: "cmn-TW", name: "cmn-TW-Wavenet-A", ssmlGender: "FEMALE"},
   //voice: {languageCode: "vi-VN", name: "vi-VN-Wavenet-A", ssmlGender: "FEMALE"},
   audioConfig: {
-    audioEncoding: "LINEAR16",
+    audioEncoding: "OGG_OPUS",//"LINEAR16",
     speakingRate: 1.15,
     pitch: 5
   }
@@ -73,6 +75,7 @@ fs.readFile("params.json", "utf8", (err, data) => {
       hotwords.push(`${greeting} ${name}`)
   }
 
+  // Increase the likelihood that speech-to-text will recognize the hotwords
   sttRequest.config.speechContexts[0].phrases = hotwords
 
   discordClient.login(params.token) // Login with the specified Discord bot token
@@ -87,6 +90,11 @@ fs.readFile("emotions.json", "utf8", (err, data) => {
 
 discordClient.on("ready", () => {
   console.log(`Logged in as ${discordClient.user.tag}!`)
+
+  // Start listening in every voice channel that the bot is apart of
+  discordClient.guilds.cache.each(guild => {
+    listenInVoiceChannel(guild.member(discordClient.user).voice.channel)
+  })
 })
 
 discordClient.on("message", msg => {
@@ -103,18 +111,13 @@ discordClient.on("message", msg => {
   msg.content = msg.content.replace(/<@.+?>|<#.+?>/g, "").trim()
 
   // Command the bot to listen in the same voice channel as the user
-  if (msg.content.toLowerCase() === "/listen") {
+  if (msg.content.toLowerCase() === "/join") {
     // Make sure the command was sent in a guild
     if (!msg.guild)
       return
-    
-    // Check the voice channel that the user is in
-    const voiceChannel = msg.member.voice.channel
-    if (!voiceChannel)
-      return
-
+        
     // Join and listen in the user's voice channel
-    listenInVoiceChannel(voiceChannel)
+    listenInVoiceChannel(msg.member.voice.channel)
     return
   }
 
@@ -123,8 +126,16 @@ discordClient.on("message", msg => {
 })
 
 async function listenInVoiceChannel(voiceChannel) {
+  // Make sure the voice channel exists
+  if (!voiceChannel)
+    return
+
   // Join the voice channel
   const connection = await voiceChannel.join()
+
+  // Make sure the bot isn't already listening
+  if (connection.listeners("speaking").length)
+    return
 
   // Play silence (required for the bot to receive audio)
   connection.play(new Silence(), {type: "opus"})
@@ -157,12 +168,20 @@ async function listenInVoiceChannel(voiceChannel) {
 
   function sttCallback(user, data) {
     // Transcribe the audio data to text
-    let transcription = data.results.map(result => result.alternatives[0].transcript).join("\n")
+    let transcription = data.results
+      .map(result => result.alternatives[0].transcript)
+      .join("\n")
+      .trim()
 
-    // If a hotword was spoken
-    if (transcription.trim().match(new RegExp(`^(${hotwords.join("|")})$`, "i"))) {
+    console.log(transcription)
+        
+    // If the bot isn't currently talking and a hotword was spoken
+    if (!audioQueues[voiceChannel.id].length && transcription.match(new RegExp(`^(${hotwords.join("|")})$`, "i"))) {
       // Play a sound prompting the user to speak
-      connection.play("ready.wav")
+      connection.play(fs.createReadStream("begin.ogg"), {
+        type: "ogg/opus",
+        highWaterMark: 50
+      })
 
       // Remember that this user has spoken a hotword
       hotwordWasSpoken[user.id] = true
@@ -180,7 +199,14 @@ async function listenInVoiceChannel(voiceChannel) {
     if (!transcription)
       return
 
-    console.log(transcription)
+    // If the bot isn't currently talking
+    if (!audioQueues[voiceChannel.id].length) {
+      // Play a sound confirming that the user was heard
+      connection.play(fs.createReadStream("confirm.ogg"), {
+        type: "ogg/opus",
+        highWaterMark: 50
+      })
+    }
 
     // This user's hotword is no longer active
     hotwordWasSpoken[user.id] = false
@@ -239,6 +265,8 @@ async function processMessage(msg, connection) {
     ttsRequest.input.text = reply
     const audioContent = (await ttsClient.synthesizeSpeech(ttsRequest))[0].audioContent
 
+    //fs.writeFile("output.wav", audioContent, "binary", () => {})
+
     // Create a readable stream containing the audio data
     const readable = new Readable()
     readable.push(audioContent)
@@ -278,7 +306,9 @@ function playNextStream(voiceChannel, connection) {
   // If there exists a stream in the queue
   if (audioQueues[voiceChannel.id] && audioQueues[voiceChannel.id].length) {
     // Play the first stream in the queue
-    connection.play(audioQueues[voiceChannel.id][0])
+    connection.play(audioQueues[voiceChannel.id][0], {
+      type: "ogg/opus"
+    })
 
     // When the stream finishes playing,
     // remove it from the queue and play the next one

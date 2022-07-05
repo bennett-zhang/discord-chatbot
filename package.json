@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/bennett-zhang/discord-chatbot#readme",
   "dependencies": {
-    "@discordjs/opus": "^0.3.2",
+    "@discordjs/opus": "^0.8.0",
     "@google-cloud/speech": "^4.1.0",
     "@google-cloud/text-to-speech": "^2.3.0",
     "bufferutil": "^4.0.1",
